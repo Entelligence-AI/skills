@@ -1,38 +1,42 @@
 # Entelligence Skills
 
-A collection of [Agent Skills](https://docs.claude.com/en/docs/agents-and-tools/agent-skills/overview)
-for Claude Code and compatible coding agents, by [Entelligence AI](https://entelligence.ai).
-
-Each skill lives in its own directory with a `SKILL.md` (and optional `references/`). Drop a skill
-into your agent's skills folder and it becomes available to your coding agent.
+[Agent Skills](https://docs.claude.com/en/docs/agents-and-tools/agent-skills/overview) for automated
+PR review workflows with [Entelligence AI](https://entelligence.ai), usable from Claude Code and
+compatible coding agents. Requires `git` + the [`gh`](https://cli.github.com) CLI, and the
+Entelligence PR review app installed on the repo. GitHub only.
 
 ## Skills
 
-### [`entloop`](entloop/SKILL.md)
+| Skill | Description |
+|-------|-------------|
+| [`entloop`](entloop/) | Loop: trigger an Entelligence review, fix every comment, resolve the threads, re-review, until 5/5 "Safe to Merge" confidence and zero unresolved threads. |
 
-Iteratively fixes a GitHub pull request until Entelligence gives it a **5/5 "Safe to Merge"**
-confidence score with zero unresolved review threads. It triggers an Entelligence review, applies
-each comment's committable suggestion or "Prompt to fix with AI", resolves the threads, pushes,
-re-triggers the review, and repeats (up to 5 iterations).
+## Requirements
 
-Requires `git`, an authenticated [`gh`](https://cli.github.com/), and the
-[Entelligence PR review app](https://github.com/apps/entelligence-ai-pr-reviews) installed on the
-repo. GitHub only.
+| Need | Tool / setup | Install |
+|------|--------------|---------|
+| Git host CLI | `gh` (authenticated) | [cli.github.com](https://cli.github.com) |
+| Reviewer | Entelligence PR review app on the repo | [github.com/apps/entelligence-ai-pr-reviews](https://github.com/apps/entelligence-ai-pr-reviews) |
+
+Authenticate before use: `gh auth login`.
 
 ## Install
 
-A skill is just a directory containing a `SKILL.md`. Install one by copying its directory into your
-Claude Code skills folder:
+Clone the repo and symlink the skills you want into your Claude Code skills directory (a skill must
+be a direct child of `~/.claude/skills/`):
 
 ```bash
-git clone https://github.com/Entelligence-AI/skills.git
-
-# user-level (available in every repo)
-cp -r skills/entloop ~/.claude/skills/
-
-# or per-project
-mkdir -p .claude/skills && cp -r skills/entloop .claude/skills/
+git clone https://github.com/Entelligence-AI/skills.git ~/.claude/skills/entelligence
+ln -s ~/.claude/skills/entelligence/entloop ~/.claude/skills/entloop
 ```
+
+Or just copy the one you want:
+
+```bash
+cp -r entloop ~/.claude/skills/
+```
+
+Per-project installs work too: use `.claude/skills/` inside the repo instead of `~/.claude/skills/`.
 
 Restart Claude Code. The agent discovers the skill by its description; on your PR branch, ask it to
 "loop this PR with entloop" (or invoke the skill directly). Because a skill is plain markdown plus
