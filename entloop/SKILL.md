@@ -138,7 +138,10 @@ while true; do
                 | select(.body | test("Confidence Score")) ]
       | sort_by(.updated_at) | last | .updated_at // ""')
 
-  if [ -n "$CUR_TS" ] && [ "$CUR_TS" \> "$BASELINE_TS" ]; then
+  # A changed updated_at means the summary comment was re-edited with the new
+  # review's score. (Use !=, not >: the [ ] / test builtin has no string > operator,
+  # and \> breaks under zsh, the default macOS shell.)
+  if [ -n "$CUR_TS" ] && [ "$CUR_TS" != "$BASELINE_TS" ]; then
     break
   fi
   echo "Waiting for confidence score to update..."
