@@ -44,11 +44,8 @@ the tools it declares, the same files work with other agents (Cursor and similar
 
 ## Related
 
-- [`entelligence-claude-code`](https://github.com/Entelligence-AI/entelligence-claude-code) - the
-  `/entelligence-review` skill and MCP server for reviewing a PR or local diff. `entloop` is the
-  autofix-loop companion to that review.
-- [`entelligence` CLI](https://github.com/Entelligence-AI/cli) - run an Entelligence review on your
-  local diff from the terminal.
+- [`entelligence` CLI](https://entelligence.ai/cli) - run an Entelligence review on your local diff
+  from the terminal.
 
 ## License
 
