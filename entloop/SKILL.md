@@ -132,26 +132,30 @@ by an async job. Wait for both:
 # check-run object and re-parse it with a second jq: its output.text holds the full
 # review markdown (badges, the score block, control characters), and re-feeding that
 # through jq fails with "control characters ... must be escaped" on every tick.
+# A review usually takes a few minutes; poll with an elapsed-time heartbeat and bail
+# after 15 min so it can never hang silently.
+SECONDS=0
 while true; do
   STATE=$(gh api "repos/{owner}/{repo}/commits/$HEAD_SHA/check-runs" \
-    --jq '[.check_runs[] | select(.name | test("entelligence"; "i"))]
+    --jq '[(.check_runs // [])[] | select(.name | test("entelligence"; "i"))]
           | "\(.[0].status // "absent") \(.[0].conclusion // "")"' 2>/dev/null)
   STATUS=${STATE%% *}; CONCLUSION=${STATE#* }
 
-  if [ -z "$STATUS" ] || [ "$STATUS" = "absent" ]; then
-    echo "Waiting for Entelligence Review check to appear..."
-    sleep 5
-    continue
-  fi
   if [ "$STATUS" = "completed" ]; then
-    echo "Entelligence Review check completed (${CONCLUSION:-unknown})."
+    echo "Entelligence Review check completed (${CONCLUSION:-unknown}) after ${SECONDS}s."
     break
   fi
-  echo "Waiting for Entelligence Review... (status: $STATUS)"
+  if [ "$SECONDS" -ge 900 ]; then
+    echo "Timed out waiting for the Entelligence Review check (${SECONDS}s). Inspect the PR manually."
+    break
+  fi
+  echo "Waiting for Entelligence Review... (${STATUS:-absent}, ${SECONDS}s elapsed)"
   sleep 10
 done
 
-# Phase 2: wait for the summary comment's confidence score to refresh past the baseline
+# Phase 2: wait for the summary comment's confidence score to refresh past the baseline.
+# The score posts a few seconds after the check completes; bail after 3 min just in case.
+SECONDS=0
 while true; do
   CUR_TS=$(gh api --paginate "repos/{owner}/{repo}/issues/<PR_NUMBER>/comments?per_page=100" 2>/dev/null \
     | jq -rs 'add
@@ -165,7 +169,11 @@ while true; do
   if [ -n "$CUR_TS" ] && [ "$CUR_TS" != "$BASELINE_TS" ]; then
     break
   fi
-  echo "Waiting for confidence score to update..."
+  if [ "$SECONDS" -ge 180 ]; then
+    echo "Confidence score did not refresh within ${SECONDS}s; using the latest available."
+    break
+  fi
+  echo "Waiting for confidence score to update... (${SECONDS}s elapsed)"
   sleep 5
 done
 ```
