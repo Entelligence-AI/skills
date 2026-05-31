@@ -99,8 +99,11 @@ Keep nodes where `isResolved == false` and `comments.nodes[0].author.login` matc
 
 Each bot review comment body contains, in order:
 
-- A severity badge image: `![CRITICAL](...)`, `![MAJOR](...)`, or `![NIT](...)`, optionally followed
-  by a category badge (e.g. `![BUG]`, `![SECURITY]`) and a bold **title**.
+- A severity marker. The agentic reviewer renders it as a shields.io badge image
+  (`![CRITICAL](...)`, `![MAJOR](...)`, or `![NIT](...)`), optionally followed by a category badge
+  (e.g. `![BUG]`, `![SECURITY]`) and a bold **title**. The error-knowledge (EKU) path instead puts it
+  in a leading HTML comment, e.g. `<!-- EKU-<id> severity=CRITICAL error_class=... -->`. Check both
+  when reading severity; it is only used to prioritize fixes, so treat it as best-effort.
 - A description of the issue.
 - Frequently a GitHub committable suggestion:
 
