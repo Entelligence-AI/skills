@@ -1,8 +1,8 @@
 ---
 name: entloop
 description: >
-  Iteratively improves a GitHub pull request until EntelligenceAI gives it a 5/5 confidence score
-  ("Safe to Merge") with zero unresolved review threads. Triggers an Entelligence review, fixes all
+  Iteratively improves a GitHub pull request until it is clean: zero unresolved review threads and a
+  confidence score of 4/5 ("Mostly Safe") or 5/5 ("Safe to Merge"). Triggers an Entelligence review, fixes all
   actionable comments using each comment's "Prompt to fix with AI" and committable suggestions,
   resolves the threads, pushes, re-triggers the review, and repeats. Use when the user wants to fully
   optimize a PR against EntelligenceAI's code review standards before merging.
@@ -18,8 +18,9 @@ allowed-tools: Bash(gh:*) Bash(git:*)
 
 # Entloop
 
-Iteratively fix a GitHub PR until EntelligenceAI gives a perfect review: 5/5 confidence
-("Safe to Merge"), zero unresolved review threads.
+Iteratively fix a GitHub PR until it is clean: zero unresolved review threads and a confidence score
+of 4/5 ("Mostly Safe") or 5/5 ("Safe to Merge"). A fully-resolved 4/5 is a valid stop - no need to
+chase the last point.
 
 EntelligenceAI posts two things on a PR:
 
@@ -31,7 +32,7 @@ EntelligenceAI posts two things on a PR:
    collapsible "Prompt to fix with AI" block you can apply directly.
 
 The confidence score is computed from the inline findings (severity counts and how many are
-unresolved). Drive the score to 5/5 by fixing and resolving every actionable thread, then
+unresolved). Drive the score to 4/5 or better by fixing and resolving every actionable thread, then
 re-triggering.
 
 ## Inputs
@@ -213,10 +214,17 @@ Keep threads where `isResolved == false` and the first comment's `author.login` 
 
 #### C. Check exit conditions
 
-Stop the loop if **either** is true:
+The goal is a clean PR, not a perfect score. Stop the loop (success) when there are **zero unresolved
+bot review threads** and the confidence score is **4/5 or 5/5** - a fully-resolved PR at 4/5
+("Mostly Safe") is just as valid a stop as 5/5, so do not grind for the last point once every inline
+comment is cleared.
 
-- Confidence score is **5/5** ("Safe to Merge") **and** there are **zero unresolved bot threads**.
-- Max iterations reached (report the current state).
+Stop if **either**:
+
+- `unresolved_threads == 0` **and** `score >= 4` (4/5 or 5/5), or
+- max iterations reached (report the current state).
+
+Keep looping only while threads are still unresolved or the score is 3/5 or lower.
 
 #### D. Fix actionable comments
 
