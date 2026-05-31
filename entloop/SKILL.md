@@ -48,6 +48,23 @@ re-triggering.
 | 2/5   | Changes Needed     | several issues                  |
 | 1/5   | Blocking Issues    | must not merge                  |
 
+## Progress output
+
+Keep the loop legible. Print short, human-readable lines; never paste raw check-run or comment JSON
+into the conversation. At the start of each iteration, print a compact status block:
+
+```
+Entloop iteration 2/5
+  Review:     completed (Entelligence Review check)
+  Confidence: 4/5 - Mostly Safe
+  Threads:    3 unresolved (2 MAJOR, 1 NIT)
+  Fixing:     pr_reviewer/utils.py:244, ai_chat/handler.py:88
+```
+
+While waiting, one "Waiting for ..." line per poll is enough. The snippets below route command
+errors to `/dev/null` on purpose - do not surface a transient API hiccup as output. Save the full
+per-finding breakdown for the final report.
+
 ## Instructions
 
 ### 1. Identify the PR
@@ -110,20 +127,24 @@ completes first, and the **confidence score** is written to the summary comment 
 by an async job. Wait for both:
 
 ```bash
-# Phase 1: wait for the "Entelligence Review" check run on this SHA to complete
+# Phase 1: wait for the "Entelligence Review" check run on this SHA to complete.
+# Pull status/conclusion as scalars inside the gh --jq call. Do NOT capture the whole
+# check-run object and re-parse it with a second jq: its output.text holds the full
+# review markdown (badges, the score block, control characters), and re-feeding that
+# through jq fails with "control characters ... must be escaped" on every tick.
 while true; do
-  CHECK=$(gh api "repos/{owner}/{repo}/commits/$HEAD_SHA/check-runs" \
-    --jq '.check_runs[] | select(.name | test("entelligence"; "i"))' 2>/dev/null)
+  STATE=$(gh api "repos/{owner}/{repo}/commits/$HEAD_SHA/check-runs" \
+    --jq '[.check_runs[] | select(.name | test("entelligence"; "i"))]
+          | "\(.[0].status // "absent") \(.[0].conclusion // "")"' 2>/dev/null)
+  STATUS=${STATE%% *}; CONCLUSION=${STATE#* }
 
-  if [ -z "$CHECK" ]; then
+  if [ -z "$STATUS" ] || [ "$STATUS" = "absent" ]; then
     echo "Waiting for Entelligence Review check to appear..."
     sleep 5
     continue
   fi
-
-  STATUS=$(echo "$CHECK" | jq -r '.status // "completed"')
   if [ "$STATUS" = "completed" ]; then
-    echo "Entelligence Review check completed ($(echo "$CHECK" | jq -r '.conclusion'))."
+    echo "Entelligence Review check completed (${CONCLUSION:-unknown})."
     break
   fi
   echo "Waiting for Entelligence Review... (status: $STATUS)"
@@ -132,7 +153,7 @@ done
 
 # Phase 2: wait for the summary comment's confidence score to refresh past the baseline
 while true; do
-  CUR_TS=$(gh api --paginate "repos/{owner}/{repo}/issues/<PR_NUMBER>/comments?per_page=100" \
+  CUR_TS=$(gh api --paginate "repos/{owner}/{repo}/issues/<PR_NUMBER>/comments?per_page=100" 2>/dev/null \
     | jq -rs 'add
       | [ .[] | select(.user.login | test("entelligence"; "i"))
                 | select(.body | test("Confidence Score")) ]
