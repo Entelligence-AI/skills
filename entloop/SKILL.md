@@ -87,91 +87,72 @@ case-insensitively against `entelligence` so the skill works against either:
 
 Repeat the following cycle. **Max 5 iterations** to avoid runaway loops.
 
-#### A. Trigger an Entelligence review
+#### A. Get the current review (trigger only if there isn't one)
 
-First push any pending local commits:
+On the first iteration the PR has usually **already been reviewed** - EntelligenceAI auto-reviews on
+open and on every push (`review_on_every_push`, on by default). So check whether a review already
+exists for the current commit and reuse it; post `@entelligence review` **only** when there is none.
+Re-triggering an existing review wastes a full review cycle (a few minutes) for nothing.
 
-```bash
-git push
-```
-
-Capture a baseline so you can tell when the review has refreshed. Record the current HEAD SHA and
-the newest timestamp on any existing Entelligence comment:
+Run the whole step as one script so the variables persist:
 
 ```bash
-HEAD_SHA=$(gh pr view <PR_NUMBER> --json headRefOid -q .headRefOid)
+git push   # no-op if there is nothing to push
 
-BASELINE_TS=$(gh api --paginate "repos/{owner}/{repo}/issues/<PR_NUMBER>/comments?per_page=100" \
-  | jq -s 'add | [ .[] | select(.user.login | test("entelligence"; "i")) | .updated_at ] | max // ""')
-```
+PR=<PR_NUMBER>
+HEAD_SHA=$(gh pr view "$PR" --json headRefOid -q .headRefOid)
 
-EntelligenceAI auto-reviews new commits when `review_on_every_push` is enabled (the default), but
-that can be turned off per repo. To guarantee a fresh review, check whether one is already running,
-and if not, post the manual trigger comment. The "Entelligence Review" check run shows the live
-state:
-
-```bash
+# State of the "Entelligence Review" check run for THIS commit.
 ENT_STATE=$(gh api "repos/{owner}/{repo}/commits/$HEAD_SHA/check-runs" \
-  --jq '.check_runs[] | select(.name | test("entelligence"; "i")) | .status' 2>/dev/null | head -1)
+  --jq 'first(.check_runs[]? | select(.name | test("entelligence"; "i")) | .status) // "absent"' 2>/dev/null)
 
-if [ "$ENT_STATE" != "queued" ] && [ "$ENT_STATE" != "in_progress" ]; then
-  gh pr comment <PR_NUMBER> --body "@entelligence review"
-fi
-```
+# updated_at of the current confidence-score comment (lets us tell when a NEW score lands).
+score_ts() { gh api --paginate "repos/{owner}/{repo}/issues/$PR/comments?per_page=100" 2>/dev/null \
+  | jq -rs 'add | [ .[] | select(.user.login | test("entelligence"; "i"))
+                          | select(.body | test("Confidence Score")) ]
+            | sort_by(.updated_at) | last | .updated_at // ""'; }
+BASELINE_TS=$(score_ts)
 
-`@entelligence review` is the canonical trigger (`@entelligenceai review` and `@entelligence-ai review`
-also work). The bot acknowledges with a 👀 reaction.
+case "$ENT_STATE" in
+  completed)          REVIEW_IS_FRESH=1
+                      echo "Entelligence already reviewed this commit - using the existing review." ;;
+  queued|in_progress) REVIEW_IS_FRESH=0
+                      echo "Entelligence is already reviewing this commit - waiting." ;;
+  *)                  REVIEW_IS_FRESH=0
+                      echo "No Entelligence review for this commit yet - requesting one."
+                      gh pr comment "$PR" --body "@entelligence review" ;;  # also: @entelligenceai review
+esac
 
-Now poll until the review has finished. This is two-phase: the **`Entelligence Review` check run**
-completes first, and the **confidence score** is written to the summary comment a few seconds later
-by an async job. Wait for both:
-
-```bash
-# Phase 1: wait for the "Entelligence Review" check run on this SHA to complete.
-# Pull status/conclusion as scalars inside the gh --jq call. Do NOT capture the whole
-# check-run object and re-parse it with a second jq: its output.text holds the full
-# review markdown (badges, the score block, control characters), and re-feeding that
-# through jq fails with "control characters ... must be escaped" on every tick.
-# A review usually takes a few minutes; poll with an elapsed-time heartbeat and bail
-# after 15 min so it can never hang silently.
+# Phase 1: wait for the "Entelligence Review" check on this commit to complete. Skipped entirely
+# when the review already completed. Pull scalars inside gh --jq; never capture the whole check-run
+# object and re-parse it - its output.text holds the review markdown (badges, score block, control
+# chars) and re-feeding that through jq fails with "control characters ... must be escaped". A review
+# takes a few minutes; heartbeat each tick and bail after 15 min so it can never hang silently.
 SECONDS=0
-while true; do
+while [ "$REVIEW_IS_FRESH" != "1" ]; do
   STATE=$(gh api "repos/{owner}/{repo}/commits/$HEAD_SHA/check-runs" \
     --jq '[(.check_runs // [])[] | select(.name | test("entelligence"; "i"))]
           | "\(.[0].status // "absent") \(.[0].conclusion // "")"' 2>/dev/null)
   STATUS=${STATE%% *}; CONCLUSION=${STATE#* }
-
   if [ "$STATUS" = "completed" ]; then
-    echo "Entelligence Review check completed (${CONCLUSION:-unknown}) after ${SECONDS}s."
-    break
+    echo "Entelligence Review check completed (${CONCLUSION:-unknown}) after ${SECONDS}s."; break
   fi
   if [ "$SECONDS" -ge 900 ]; then
-    echo "Timed out waiting for the Entelligence Review check (${SECONDS}s). Inspect the PR manually."
-    break
+    echo "Timed out waiting for the Entelligence Review check (${SECONDS}s). Inspect the PR manually."; break
   fi
   echo "Waiting for Entelligence Review... (${STATUS:-absent}, ${SECONDS}s elapsed)"
   sleep 10
 done
 
-# Phase 2: wait for the summary comment's confidence score to refresh past the baseline.
-# The score posts a few seconds after the check completes; bail after 3 min just in case.
+# Phase 2: wait for the summary comment's score to reflect this commit. If the review already
+# existed it is current already (take it once present); otherwise wait for updated_at to move past
+# the baseline. (!=, not >: [ ] / test has no string > operator and \> breaks under zsh.)
 SECONDS=0
 while true; do
-  CUR_TS=$(gh api --paginate "repos/{owner}/{repo}/issues/<PR_NUMBER>/comments?per_page=100" 2>/dev/null \
-    | jq -rs 'add
-      | [ .[] | select(.user.login | test("entelligence"; "i"))
-                | select(.body | test("Confidence Score")) ]
-      | sort_by(.updated_at) | last | .updated_at // ""')
-
-  # A changed updated_at means the summary comment was re-edited with the new
-  # review's score. (Use !=, not >: the [ ] / test builtin has no string > operator,
-  # and \> breaks under zsh, the default macOS shell.)
-  if [ -n "$CUR_TS" ] && [ "$CUR_TS" != "$BASELINE_TS" ]; then
-    break
-  fi
+  CUR_TS=$(score_ts)
+  if [ -n "$CUR_TS" ] && { [ "$REVIEW_IS_FRESH" = "1" ] || [ "$CUR_TS" != "$BASELINE_TS" ]; }; then break; fi
   if [ "$SECONDS" -ge 180 ]; then
-    echo "Confidence score did not refresh within ${SECONDS}s; using the latest available."
-    break
+    echo "Confidence score did not refresh within ${SECONDS}s; using the latest available."; break
   fi
   echo "Waiting for confidence score to update... (${SECONDS}s elapsed)"
   sleep 5
