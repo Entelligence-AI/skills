@@ -9,7 +9,7 @@ Entelligence PR review app installed on the repo. GitHub only.
 
 | Skill | Description |
 |-------|-------------|
-| [`entloop`](entloop/) | Loop: trigger an Entelligence review, fix every comment, resolve the threads, re-review, until 5/5 "Safe to Merge" confidence and zero unresolved threads. |
+| [`entloop`](entloop/) | Loop: trigger an Entelligence review, fix every comment, resolve the threads, re-review, until zero unresolved threads at 4/5 "Mostly Safe" or 5/5 "Safe to Merge". |
 
 ## Requirements
 
