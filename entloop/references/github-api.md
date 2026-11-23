@@ -6,14 +6,20 @@ For GraphQL, substitute `OWNER`, `REPO`, and `PR_NUMBER` literally.
 
 ## EntelligenceAI identifiers
 
-- **Bot logins** (match case-insensitively on `entelligence`):
+- **Bot logins** (exact, case-insensitive allowlist; never a bare `entelligence` substring, which a
+  similarly named account could satisfy):
   - `entelligence-ai-pr-reviews[bot]` (production)
   - `entelligenceai-pr-review-alpha[bot]` (alpha/staging)
+  REST returns these WITH the `[bot]` suffix. GraphQL (`author { login }`) returns them WITHOUT it
+  (`entelligence-ai-pr-reviews`), so strip the suffix before comparing a GraphQL login.
 - **Check run name**: `Entelligence Review`
 - **Summary comment**: a single issue comment whose body starts with `## EntelligenceAI PR Summary`
   and contains the confidence-score block delimited by `<!-- CONFIDENCE_SCORE -->`. It is edited in
   place each review, so always select the one with the latest `updated_at`.
-- **Score line format**: `## Confidence Score: <n>/5 - <label>`
+- **Score format**: current bots render a table row
+  `| **Merge Confidence** | ●●●○○ **<n>/5** — <label> | … |`; older deployments a line
+  `## Confidence Score: <n>/5 - <label>`. Parse both, and fall back to the first `<n>/5` after the
+  `<!-- CONFIDENCE_SCORE -->` marker.
 - **Manual triggers** (PR comments): `@entelligence review`, `@entelligenceai review`,
   `@entelligence-ai review`. Related commands: `@entelligence resolve_all`, `@entelligence summary`,
   `@entelligence config`.
@@ -27,6 +33,11 @@ gh pr view --json number,headRefName,headRefOid \
 
 ## Trigger a review
 
+EntelligenceAI reviews every push on its own (`review_on_every_push`, on by default), and the
+check run appears 30-60 s after the push. Never post a trigger right after pushing: wait for the
+check run to appear first, and post only when none shows up (auto-review off, or a lost webhook).
+A trigger posted too early starts a second, whole-PR review of the same commit.
+
 ```bash
 gh pr comment <PR_NUMBER> --body "@entelligence review"
 ```
@@ -35,7 +46,7 @@ gh pr comment <PR_NUMBER> --body "@entelligence review"
 
 ```bash
 gh api "repos/{owner}/{repo}/commits/<HEAD_SHA>/check-runs" \
-  --jq '.check_runs[] | select(.name | test("entelligence"; "i")) | {status, conclusion}'
+  --jq '.check_runs[] | select(.name == "Entelligence Review") | {status, conclusion}'
 ```
 
 Terminal `status` is `completed`; `conclusion` is `success` or `failure`. The check run can be
@@ -50,8 +61,9 @@ The summary comment is an issue comment that the bot edits in place, so select b
 ```bash
 gh api --paginate "repos/{owner}/{repo}/issues/<PR_NUMBER>/comments?per_page=100" \
   | jq -s 'add
-    | [ .[] | select(.user.login | test("entelligence"; "i"))
-              | select(.body | test("Confidence Score")) ]
+    | [ .[] | select(.user.login | ascii_downcase
+                       | IN("entelligence-ai-pr-reviews[bot]", "entelligenceai-pr-review-alpha[bot]"))
+              | select(.body | test("CONFIDENCE_SCORE|Confidence Score|Merge Confidence")) ]
     | sort_by(.updated_at) | last
     | {author: .user.login, updated_at, body}'
 ```
@@ -60,8 +72,8 @@ Parse the score and label from the body (use `printf`, not `echo`, when re-feedi
 to grep):
 
 ```bash
-printf '%s\n' "$BODY" | grep -oE 'Confidence Score: [0-9]+/5 - .*' | head -1
-# -> "Confidence Score: 3/5 - Review Recommended"
+printf '%s\n' "$BODY" | grep -E 'Merge Confidence' | grep -oE '\*\*[0-9]+/5\*\*' | head -1
+# -> "**3/5**"   (legacy: grep -oE 'Confidence Score: [0-9]+/5 - .*')
 ```
 
 ## Fetch unresolved review threads (GraphQL, paginated)
@@ -92,8 +104,8 @@ query($cursor: String) {
 }
 ```
 
-Keep nodes where `isResolved == false` and `comments.nodes[0].author.login` matches `entelligence`
-(case-insensitive). Page through with the returned `endCursor` while `hasNextPage` is true.
+Keep nodes where `isResolved == false` and `comments.nodes[0].author.login`, lowercased, is
+`entelligence-ai-pr-reviews` or `entelligenceai-pr-review-alpha` (GraphQL drops the `[bot]` suffix). Page through with the returned `endCursor` while `hasNextPage` is true.
 
 ### Inline comment body anatomy
 
