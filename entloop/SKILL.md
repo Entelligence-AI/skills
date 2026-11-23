@@ -319,9 +319,10 @@ Keep looping only while threads are still unresolved or the score is 3/5 or lowe
 
 **Every push is a full review round** (the main review plus any deep-review pass), so never push
 just for NITs. When the score is 4/5 or 5/5 and only NIT threads remain, do not start another
-iteration: fix the cheap ones and commit them locally (unpushed, listed in the report so the user
-ships them with their next change), reply on the rest, resolve them all, and stop. NIT fixes that
-ride along with a CRITICAL or MAJOR fix in the same push are fine.
+iteration and do not edit code for them: reply on each NIT (the change you would make, or why it
+is not worth making), resolve it, list it in the report as deferred, and stop. Never resolve a
+thread for a fix that exists only in an unpushed commit: the PR would look clean while the fix
+never ships. NIT fixes that ride along with a CRITICAL or MAJOR fix in the same push are fine.
 
 #### D. Fix actionable comments
 
